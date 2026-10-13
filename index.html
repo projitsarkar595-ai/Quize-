@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#070a14">
-<title>PulseQuiz — YouTube Live Current Affairs</title>
+<title>PulseQuiz — India GK, Tricky Math & Politics Quiz</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet">
@@ -632,11 +632,44 @@ body {
   .opt-btn { min-height: 52px; padding: 10px 12px; }
   .question-title { font-size: 1.15rem; min-height: 48px; margin-bottom: 12px; }
 }
+
+/* Audio Unlock Banner */
+.audio-banner {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.95), rgba(6, 182, 212, 0.95));
+  color: #ffffff;
+  padding: 8px 14px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 4px 18px rgba(139, 92, 246, 0.45);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  animation: bannerPulse 2s infinite ease-in-out;
+  margin-bottom: 2px;
+}
+.audio-banner.hidden {
+  display: none !important;
+}
+@keyframes bannerPulse {
+  0%, 100% { transform: scale(1); opacity: 0.95; }
+  50% { transform: scale(1.02); opacity: 1; }
+}
+
 </style>
 </head>
 <body>
 
 <div class="live-container">
+  <!-- Audio Autoplay Unlock Prompt (Displays when browser starts audio suspended) -->
+  <div class="audio-banner" id="audioUnlockBanner" onclick="unlockAudio()">
+    🔊 <span>Tap anywhere to activate live quiz audio</span>
+  </div>
+
   <!-- YouTube Live Header -->
   <header class="stream-header">
     <div class="brand-badge">
@@ -664,7 +697,7 @@ body {
   <main class="quiz-card" id="quizCard">
     <section id="gameView">
       <div class="stage-top">
-        <span class="category-tag" id="categoryTag">🇮🇳 INDIA</span>
+        <span class="category-tag" id="categoryTag">🧮 TRICKY MATH</span>
         <div class="q-counter">QUESTION <b id="qnum">01</b><span> / 100</span></div>
       </div>
 
@@ -729,7 +762,7 @@ body {
       <input id="apiKey" type="password" placeholder="Paste GNews API Key (optional)" autocomplete="off">
       <button id="loadNews">Fetch Latest 7-Day News</button>
       <div style="font-size: 0.72rem; color: #94a3b8;" id="apiStatus">
-        Default mode runs 100 curated Current Affairs questions offline. Add a free GNews API key to pull live breaking headlines.
+        Default mode runs 100 curated India GK, Tricky Math & Politics questions offline. Add a free GNews API key to pull live breaking headlines.
       </div>
     </div>
   </details>
@@ -748,6 +781,7 @@ body {
 class SoundEngine {
   constructor() {
     this.ctx = null;
+    this.masterGain = null;
     this.enabled = true;
   }
 
@@ -756,15 +790,28 @@ class SoundEngine {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(this.enabled ? 1.0 : 0.0, this.ctx.currentTime);
+        this.masterGain.connect(this.ctx.destination);
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().then(() => {
+        const banner = document.getElementById("audioUnlockBanner");
+        if (banner) banner.classList.add("hidden");
+      }).catch(() => {});
     }
   }
 
-  // Countdown second tick (crisp clock blip)
-  playTick(isUrgent = false) {
+  setEnabled(val) {
+    this.enabled = val;
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.enabled ? 1.0 : 0.0, this.ctx.currentTime);
+    }
+  }
+
+  // Question start / round begin blip
+  playQuestionStart() {
     if (!this.enabled) return;
     this.init();
     if (!this.ctx) return;
@@ -773,28 +820,83 @@ class SoundEngine {
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
-    osc.type = isUrgent ? 'sawtooth' : 'sine';
-    
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.10);
+
+    gain.gain.setValueAtTime(0.20, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain || this.ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+
+  // Countdown second tick (crisp clock tick-tock for 25s, urgent alarm for last 5s)
+  playTick(isUrgent = false, second = 0) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    const dest = this.masterGain || this.ctx.destination;
+
     if (isUrgent) {
-      // High urgency double-click tone for final 5 seconds
-      osc.frequency.setValueAtTime(880, now); // A5 note
-      osc.frequency.exponentialRampToValueAtTime(1100, now + 0.06);
-      gain.gain.setValueAtTime(0.18, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      // High urgency warning alarm for final 5 seconds
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, now); // A5
+      osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08); // E6
+
+      gain.gain.setValueAtTime(0.26, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(dest);
+
       osc.start(now);
-      osc.stop(now + 0.08);
+      osc.stop(now + 0.09);
     } else {
-      // Gentle modern broadcast click
-      osc.frequency.setValueAtTime(600, now);
-      osc.frequency.exponentialRampToValueAtTime(300, now + 0.04);
-      gain.gain.setValueAtTime(0.08, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+      // CLEAR, AUDIBLE CLOCK TICK-TOCK FOR THE 25-SECOND TIMER
+      // Alternates higher 'Tick' (even second) and lower 'Tock' (odd second)
+      const isEven = (second % 2 === 0);
+      const baseFreq = isEven ? 1150 : 880;
+
+      // Primary tone body (triangle wave cuts through mobile/laptop speakers)
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(baseFreq, now);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.45, now + 0.06);
+
+      gain.gain.setValueAtTime(0.24, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(dest);
+
       osc.start(now);
-      osc.stop(now + 0.04);
+      osc.stop(now + 0.07);
+
+      // Mechanical crisp transient click
+      const clickOsc = this.ctx.createOscillator();
+      const clickGain = this.ctx.createGain();
+
+      clickOsc.type = 'square';
+      clickOsc.frequency.setValueAtTime(isEven ? 2400 : 1900, now);
+      clickGain.gain.setValueAtTime(0.12, now);
+      clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+
+      clickOsc.connect(clickGain);
+      clickGain.connect(dest);
+
+      clickOsc.start(now);
+      clickOsc.stop(now + 0.02);
     }
   }
 
@@ -804,6 +906,7 @@ class SoundEngine {
     this.init();
     if (!this.ctx) return;
 
+    const dest = this.masterGain || this.ctx.destination;
     const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
     notes.forEach((freq, i) => {
       const startTime = this.ctx.currentTime + (i * 0.07);
@@ -813,11 +916,11 @@ class SoundEngine {
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(freq, startTime);
 
-      gain.gain.setValueAtTime(0.2, startTime);
+      gain.gain.setValueAtTime(0.25, startTime);
       gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
 
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
+      gain.connect(dest);
 
       osc.start(startTime);
       osc.stop(startTime + 0.35);
@@ -830,6 +933,7 @@ class SoundEngine {
     this.init();
     if (!this.ctx) return;
 
+    const dest = this.masterGain || this.ctx.destination;
     const now = this.ctx.currentTime;
     const osc1 = this.ctx.createOscillator();
     const osc2 = this.ctx.createOscillator();
@@ -845,12 +949,12 @@ class SoundEngine {
     osc2.frequency.setValueAtTime(125, now);
     osc2.frequency.linearRampToValueAtTime(100, now + 0.32);
 
-    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.setValueAtTime(0.22, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
 
     osc1.connect(gain);
     osc2.connect(gain);
-    gain.connect(this.ctx.destination);
+    gain.connect(dest);
 
     osc1.start(now);
     osc2.start(now);
@@ -864,6 +968,7 @@ class SoundEngine {
     this.init();
     if (!this.ctx) return;
 
+    const dest = this.masterGain || this.ctx.destination;
     const now = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -872,11 +977,11 @@ class SoundEngine {
     osc.frequency.setValueAtTime(220, now);
     osc.frequency.linearRampToValueAtTime(110, now + 0.45);
 
-    gain.gain.setValueAtTime(0.16, now);
+    gain.gain.setValueAtTime(0.22, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
 
     osc.connect(gain);
-    gain.connect(this.ctx.destination);
+    gain.connect(dest);
 
     osc.start(now);
     osc.stop(now + 0.45);
@@ -886,115 +991,109 @@ class SoundEngine {
 const sounds = new SoundEngine();
 
 /* ============================================================
-   100 CURATED CURRENT AFFAIRS QUESTIONS BANK
+   100 CURATED INDIA GK, TRICKY MATH & POLITICS QUESTIONS BANK
    ============================================================ */
 const BANK = [
-{c:"INDIA",q:"Which organisation conducts India's national population census?",o:["Election Commission of India","Office of the Registrar General and Census Commissioner","NITI Aayog","Union Public Service Commission"],a:1},
-{c:"SCIENCE",q:"What is the name of India's first solar observatory mission?",o:["Chandrayaan-3","Mangalyaan","Aditya-L1","Astrosat"],a:2},
-{c:"INDIA",q:"Which body is responsible for monetary policy in India?",o:["SEBI","Reserve Bank of India","NABARD","Finance Commission"],a:1},
-{c:"WORLD",q:"Where is the headquarters of the United Nations located?",o:["Geneva","Paris","New York City","Vienna"],a:2},
-{c:"SCIENCE",q:"What does ISRO stand for?",o:["Indian Space Research Organisation","International Satellite Research Office","Indian Science and Rocket Organisation","Institute for Space Research Operations"],a:0},
-{c:"WORLD",q:"Which organisation publishes the World Economic Outlook report?",o:["World Bank","International Monetary Fund","World Trade Organization","UNESCO"],a:1},
-{c:"INDIA",q:"Which Indian institution is widely associated with digital payments platform UPI?",o:["NPCI","UIDAI","TRAI","BIS"],a:0},
-{c:"CLIMATE",q:"What is the main purpose of the annual UN climate COP conferences?",o:["Set global internet standards","Negotiate international climate action","Regulate international sports","Set oil company prices"],a:1},
-{c:"WORLD",q:"Which city hosts the main institutions of the European Union, including the European Commission?",o:["Brussels","Madrid","Lisbon","Athens"],a:0},
-{c:"INDIA",q:"What is India's national space agency called?",o:["DRDO","ISRO","BARC","CSIR"],a:1},
-{c:"ECONOMY",q:"What does GDP measure?",o:["A country's total value of final goods and services produced","Only government tax revenue","A country's total population","Only the value of exports"],a:0},
-{c:"WORLD",q:"Which agency coordinates much of the United Nations' public-health work?",o:["UNICEF","WHO","UNHCR","ILO"],a:1},
-{c:"INDIA",q:"Which Indian authority issues Aadhaar numbers?",o:["NPCI","UIDAI","SEBI","NHAI"],a:1},
-{c:"TECH",q:"What does AI stand for in technology?",o:["Automated Internet","Artificial Intelligence","Advanced Interface","Applied Information"],a:1},
-{c:"WORLD",q:"Which city is the headquarters of the World Health Organization?",o:["Rome","Geneva","New York","Nairobi"],a:1},
-{c:"INDIA",q:"Which organisation manages India's national elections?",o:["Supreme Court of India","Election Commission of India","NITI Aayog","Finance Ministry"],a:1},
-{c:"SCIENCE",q:"Which planet is known as the Red Planet?",o:["Venus","Mars","Jupiter","Mercury"],a:1},
-{c:"ECONOMY",q:"What does inflation generally mean?",o:["A sustained rise in the general price level","A fall in all wages","A rise in exports only","A reduction in money supply only"],a:0},
-{c:"WORLD",q:"Which international organisation is associated with global trade rules?",o:["WTO","WHO","WMO","ICAO"],a:0},
-{c:"INDIA",q:"What is the upper house of India's Parliament called?",o:["Lok Sabha","Rajya Sabha","Vidhan Sabha","Gram Sabha"],a:1},
-{c:"TECH",q:"What is a deepfake?",o:["A type of battery","AI-generated or manipulated media that can imitate real people","A secure payment method","A satellite navigation system"],a:1},
-{c:"CLIMATE",q:"Which gas is the largest contributor to human-caused global warming by total emissions?",o:["Carbon dioxide","Helium","Neon","Hydrogen"],a:0},
-{c:"WORLD",q:"Which organisation awards the Nobel Peace Prize?",o:["Norwegian Nobel Committee","European Parliament","United Nations Security Council","International Court of Justice"],a:0},
-{c:"INDIA",q:"Which Indian mission made a soft landing near the Moon's south polar region in 2023?",o:["Chandrayaan-1","Chandrayaan-2","Chandrayaan-3","Mangalyaan"],a:2},
-{c:"ECONOMY",q:"What is the main role of a central bank?",o:["Run all private shops","Manage monetary policy and currency-related functions","Organise national elections","Set school curricula"],a:1},
-{c:"WORLD",q:"Where is the International Court of Justice based?",o:["The Hague","Berlin","Tokyo","Ottawa"],a:0},
-{c:"TECH",q:"What does cybersecurity primarily aim to protect?",o:["Digital systems, networks and data","Only printed books","Road traffic signals only","Agricultural soil"],a:0},
-{c:"INDIA",q:"Which body regulates India's securities market?",o:["SEBI","RBI","UIDAI","ISRO"],a:0},
-{c:"WORLD",q:"Which UN agency focuses especially on children?",o:["UNICEF","UNIDO","UNCTAD","UN Women"],a:0},
-{c:"SCIENCE",q:"What does DNA carry in living organisms?",o:["Genetic information","Radio signals","Electrical grid data","Weather forecasts"],a:0},
-{c:"INDIA",q:"What is the name of India's instant bank-to-bank payment system commonly used by QR codes?",o:["UPI","FASTag","DigiLocker","Aadhaar Pay only"],a:0},
-{c:"WORLD",q:"Which currency is used by many members of the European Union?",o:["Euro","Pound sterling","Swiss franc","Krone"],a:0},
-{c:"CLIMATE",q:"What is renewable energy?",o:["Energy from sources naturally replenished","Energy only from coal","Energy that cannot be reused","Energy made only from petrol"],a:0},
-{c:"INDIA",q:"Which Indian body investigates major defence research and development projects?",o:["DRDO","SEBI","NHAI","FSSAI"],a:0},
-{c:"WORLD",q:"What does NATO stand for?",o:["North Atlantic Treaty Organization","National Air Transport Office","Northern Asian Trade Organisation","New Atlantic Technology Office"],a:0},
-{c:"TECH",q:"What is phishing in cybersecurity?",o:["A deceptive attempt to steal sensitive information","A way to compress video","A computer cooling method","A satellite launch technique"],a:0},
-{c:"INDIA",q:"Which ministry is primarily responsible for India's foreign relations?",o:["Ministry of External Affairs","Ministry of Railways","Ministry of Education","Ministry of Agriculture"],a:0},
-{c:"WORLD",q:"Which city is the headquarters of the African Union?",o:["Addis Ababa","Lagos","Cairo","Cape Town"],a:0},
-{c:"ECONOMY",q:"What is a trade deficit?",o:["When imports exceed exports in value","When exports exceed imports in value","When a country has no taxes","When inflation is zero"],a:0},
-{c:"SCIENCE",q:"What does a vaccine help the immune system do?",o:["Recognise and respond to a pathogen","Replace all white blood cells","Prevent every possible illness","Increase body temperature permanently"],a:0},
-{c:"INDIA",q:"Which Indian programme aims to expand digital public services and connectivity?",o:["Digital India","Project Tiger only","Operation Flood only","Green Revolution only"],a:0},
-{c:"WORLD",q:"Which organisation is responsible for international civil aviation standards?",o:["ICAO","FIFA","WIPO","OPEC"],a:0},
-{c:"TECH",q:"What is cloud computing?",o:["Using remote servers to store, manage or process data","Predicting rain from clouds only","A type of screen protector","A paper filing method"],a:0},
-{c:"INDIA",q:"Which Indian body conducts the Civil Services Examination?",o:["UPSC","SSC only","NTA","UGC"],a:0},
-{c:"WORLD",q:"What is the main purpose of the World Bank Group?",o:["Development finance and poverty reduction","Global policing","Managing Olympic events","Issuing passports worldwide"],a:0},
-{c:"CLIMATE",q:"What is the Paris Agreement mainly concerned with?",o:["Climate change","International postal rates","Space traffic","Global copyright law"],a:0},
-{c:"INDIA",q:"Which body sets food safety standards in India?",o:["FSSAI","SEBI","TRAI","IRDAI"],a:0},
-{c:"SCIENCE",q:"What is the purpose of a satellite navigation system such as GPS?",o:["Positioning and navigation","Measuring blood groups","Generating electricity from coal","Detecting all viruses"],a:0},
-{c:"WORLD",q:"Which organisation represents many oil-exporting countries?",o:["OPEC","OECD","ASEAN","APEC"],a:0},
-{c:"TECH",q:"What is two-factor authentication designed to do?",o:["Add a second verification step to account access","Double internet speed","Make a password public","Remove the need for passwords in every case"],a:0},
-{c:"INDIA",q:"What does the Indian acronym NITI Aayog refer to?",o:["National Institution for Transforming India","National Institute for Technical Inspection","New India Transport Initiative","National Investment and Tax Institute"],a:0},
-{c:"WORLD",q:"Where is UNESCO headquartered?",o:["Paris","Geneva","New Delhi","Washington, D.C."],a:0},
-{c:"ECONOMY",q:"What is a fiscal deficit?",o:["Government expenditure exceeding its receipts, excluding borrowings","A country's imports exceeding exports","A fall in stock prices","A rise in household savings"],a:0},
-{c:"SCIENCE",q:"Which instrument is used to observe distant astronomical objects?",o:["Telescope","Barometer","Seismograph","Hygrometer"],a:0},
-{c:"INDIA",q:"Which agency operates India's FASTag electronic toll collection system through a national framework?",o:["National Highways Authority of India","Election Commission of India","University Grants Commission","Food Safety and Standards Authority"],a:0},
-{c:"WORLD",q:"Which city is home to the headquarters of the International Atomic Energy Agency?",o:["Vienna","Madrid","Seoul","Brasília"],a:0},
-{c:"TECH",q:"What is an open-source software project?",o:["Software whose source code is available under a licence allowing specified use and modification","Software that has no code","Software that can only run offline","Software owned by a public library"],a:0},
-{c:"INDIA",q:"Which organisation is India's national accreditation body for higher education institutions?",o:["NAAC","NABARD","NHAI","NCDC"],a:0},
-{c:"WORLD",q:"What is ASEAN?",o:["A regional association of Southeast Asian countries","A European central bank","A global space agency","A South American court"],a:0},
-{c:"CLIMATE",q:"What does biodiversity mean?",o:["The variety of life at genetic, species and ecosystem levels","Only the number of trees in a city","The amount of rainfall in a year","The number of vehicles on roads"],a:0},
-{c:"INDIA",q:"Which Indian institution is responsible for weather forecasts and cyclone warnings?",o:["India Meteorological Department","Geological Survey of India","Survey of India","National Testing Agency"],a:0},
-{c:"WORLD",q:"Which body is the principal judicial organ of the United Nations?",o:["International Court of Justice","International Criminal Court","European Court of Human Rights","Permanent Court of Arbitration"],a:0},
-{c:"TECH",q:"What does 5G refer to?",o:["The fifth generation of mobile network technology","A fifth-generation computer processor only","A type of satellite orbit","A file compression standard"],a:0},
-{c:"INDIA",q:"Which Indian organisation issues weather-related cyclone alerts to the public?",o:["India Meteorological Department","RBI","SEBI","UIDAI"],a:0},
-{c:"ECONOMY",q:"What is a repo rate in India?",o:["The rate at which RBI lends short-term funds to banks against eligible securities","The tax on imported goods","The interest paid on every savings account","The rate of currency exchange at airports"],a:0},
-{c:"WORLD",q:"Which organisation leads international cooperation on labour standards and workers' rights?",o:["International Labour Organization","World Tourism Organization","World Intellectual Property Organization","International Maritime Organization"],a:0},
-{c:"SCIENCE",q:"What is the primary purpose of a space telescope?",o:["Observe celestial objects from space","Measure ocean salinity from a classroom","Transmit electricity to homes","Control all aircraft routes"],a:0},
-{c:"INDIA",q:"What is DigiLocker designed to provide?",o:["Digital access to verified documents and certificates","A cryptocurrency exchange","An online gaming console","A weather forecasting service"],a:0},
-{c:"WORLD",q:"Which organisation coordinates global meteorological cooperation?",o:["World Meteorological Organization","World Trade Organization","World Customs Organization","International Olympic Committee"],a:0},
-{c:"TECH",q:"What is a QR code commonly used for?",o:["Encoding information that can be scanned by a device","Cooling a processor","Measuring air pressure","Encrypting every internet connection automatically"],a:0},
-{c:"INDIA",q:"Which body regulates telecommunications in India?",o:["TRAI","SEBI","FSSAI","AICTE"],a:0},
-{c:"WORLD",q:"What is the G20 primarily a forum for?",o:["International economic cooperation","Global football competitions","Space exploration only","World heritage site inspections only"],a:0},
-{c:"CLIMATE",q:"What is the greenhouse effect?",o:["Warming as greenhouse gases absorb and re-emit infrared radiation","Cooling caused by all clouds","The process of turning seawater into salt","The movement of tectonic plates"],a:0},
-{c:"INDIA",q:"Which organisation oversees technical education standards and approval in India?",o:["AICTE","FSSAI","TRAI","NABARD"],a:0},
-{c:"WORLD",q:"Which UN agency works on education, science and culture?",o:["UNESCO","UNICEF","UNHCR","WFP"],a:0},
-{c:"ECONOMY",q:"What does a country's foreign-exchange reserve generally include?",o:["Foreign currency assets and other reserve assets held by its monetary authority","Only gold jewellery owned by citizens","Only tax collected at airports","All private company profits"],a:0},
-{c:"SCIENCE",q:"What does a seismograph record?",o:["Ground motion from earthquakes and other seismic activity","Wind direction only","Ocean colour only","Air humidity only"],a:0},
-{c:"INDIA",q:"Which Indian institution manages the national highway network development framework?",o:["National Highways Authority of India","Election Commission of India","National Green Tribunal","University Grants Commission"],a:0},
-{c:"WORLD",q:"What is the main purpose of the International Red Cross and Red Crescent Movement?",o:["Humanitarian assistance and protection during crises","Setting global interest rates","Regulating airline ticket prices","Running international elections"],a:0},
-{c:"TECH",q:"What does encryption do to data?",o:["Transforms it so it is unreadable without the appropriate key","Deletes it after one minute","Makes it publicly searchable","Automatically verifies every fact in it"],a:0},
-{c:"INDIA",q:"Which Indian agency is associated with the national tiger conservation programme?",o:["National Tiger Conservation Authority","SEBI","TRAI","NTA"],a:0},
-{c:"WORLD",q:"Which organisation administers the Olympic Games?",o:["International Olympic Committee","FIFA","World Athletics only","UNESCO"],a:0},
-{c:"CLIMATE",q:"What is adaptation to climate change?",o:["Adjusting systems and communities to actual or expected climate impacts","Stopping all weather events","Measuring only daily temperature","Replacing all electricity with coal"],a:0},
-{c:"INDIA",q:"Which body regulates insurance companies in India?",o:["IRDAI","SEBI","RBI only","TRAI"],a:0},
-{c:"WORLD",q:"What is the main role of the UN Security Council?",o:["Maintain international peace and security","Manage global school exams","Set every country's tax rates","Issue all international driving licences"],a:0},
-{c:"TECH",q:"What is a large language model (LLM)?",o:["An AI model trained on large amounts of text to process and generate language","A device that measures internet cables","A database that stores only photographs","A type of computer battery"],a:0},
-{c:"INDIA",q:"Which organisation conducts the JEE Main examination in India?",o:["National Testing Agency","UPSC","AICTE directly","Election Commission of India"],a:0},
-{c:"WORLD",q:"Which organisation promotes international intellectual-property cooperation?",o:["World Intellectual Property Organization","World Health Organization","International Monetary Fund","International Civil Aviation Organization"],a:0},
-{c:"ECONOMY",q:"What is a sovereign credit rating intended to assess?",o:["A government's ability and willingness to meet debt obligations","A country's average rainfall","A nation's football ranking","The quality of every individual bank account"],a:0},
-{c:"SCIENCE",q:"Which renewable source generates electricity using moving air?",o:["Wind energy","Geothermal energy","Tidal energy only","Biomass only"],a:0},
-{c:"INDIA",q:"Which Indian programme supports financial inclusion through basic bank accounts?",o:["Pradhan Mantri Jan Dhan Yojana","Project Tiger","Beti Bachao Beti Padhao only","Make in India only"],a:0},
-{c:"WORLD",q:"What is the purpose of the UN Sustainable Development Goals?",o:["Provide a shared framework for social, economic and environmental progress","Set the rules of international football","Control all national currencies","Replace every country's constitution"],a:0},
-{c:"TECH",q:"What is the purpose of a CAPTCHA on a website?",o:["Help distinguish human users from automated activity","Increase screen brightness","Store a user's bank balance","Make a website work without a server"],a:0},
-{c:"INDIA",q:"Which institution is responsible for accreditation and coordination of university education at the national level in India?",o:["University Grants Commission","NHAI","FSSAI","IRDAI"],a:0},
-{c:"WORLD",q:"Which organisation provides food assistance in emergencies around the world?",o:["World Food Programme","World Intellectual Property Organization","International Telecommunication Union","International Maritime Organization"],a:0},
-{c:"CLIMATE",q:"What is carbon neutrality?",o:["Balancing emitted carbon dioxide with removals or equivalent reductions","Producing no energy at all","Using carbon as the only fuel","Increasing emissions every year"],a:0},
-{c:"INDIA",q:"Which Indian agency is responsible for food product standards and safety regulation?",o:["FSSAI","RBI","TRAI","DRDO"],a:0},
-{c:"WORLD",q:"Which organisation sets international rules for maritime safety and pollution prevention?",o:["International Maritime Organization","International Labour Organization","World Tourism Organization","World Anti-Doping Agency"],a:0},
-{c:"TECH",q:"What does a software security patch typically do?",o:["Fixes a vulnerability or software defect","Adds physical memory chips","Changes a laptop's screen size","Guarantees that a device can never be hacked"],a:0},
-{c:"INDIA",q:"Which Indian institution is responsible for regulating the banking system and issuing banknotes?",o:["Reserve Bank of India","SEBI","NITI Aayog","Election Commission of India"],a:0},
-{c:"WORLD",q:"Which city is the headquarters of the International Monetary Fund?",o:["Washington, D.C.","Geneva","Brussels","Singapore"],a:0},
-{c:"SCIENCE",q:"What is the main purpose of a weather satellite?",o:["Observe clouds, storms and atmospheric conditions","Issue passports","Control railway signals","Measure the price of gold"],a:0},
-{c:"INDIA",q:"Which platform is widely used in India to store and share digital documents issued by government bodies?",o:["DigiLocker","OPEC","NATO","WIPO"],a:0},
-{c:"WORLD",q:"What is the main goal of humanitarian aid?",o:["Save lives, reduce suffering and protect human dignity during crises","Increase import tariffs","Promote a single political party","Set global stock-market prices"],a:0},
-{c:"TECH",q:"What is multi-factor authentication?",o:["Verifying identity using two or more different factor types","Using the same password on several sites","Logging in without checking identity","Sharing a one-time code publicly"],a:0},
-{c:"INDIA",q:"Which organisation is responsible for India's defence research and development?",o:["Defence Research and Development Organisation","National Testing Agency","Food Safety and Standards Authority","National Highways Authority"],a:0}
+{c:"TRICKY MATH",q:"A 150-metre-long Vande Bharat Express passes an electric pole in 6 seconds. What is the speed of the train in km/h?",o:["75 km/h", "90 km/h", "80 km/h", "100 km/h"],a:1,fact:"Speed = 150m ÷ 6s = 25 m/s. In km/h: 25 × (18/5) = 90 km/h."},
+{c:"TRICKY MATH",q:"A piggy bank has ₹1, ₹2, and ₹5 coins in the ratio 3:2:1. If the total money is ₹240, how many ₹5 coins are there?",o:["15", "20", "25", "30"],a:1,fact:"Value equation: 3(1) + 2(2) + 1(5) = 12 units = ₹240, so 1 unit = 20 coins of ₹5."},
+{c:"TRICKY MATH",q:"In a 20-over match in Mumbai, Team India scored at a run rate of 6.5 in the first 10 overs. What run rate is needed in the remaining 10 overs to reach 175?",o:["10.5", "11.0", "11.5", "12.0"],a:1,fact:"Runs in first 10 overs = 65. Needed in remaining 10 overs = 175 - 65 = 110 runs, so required run rate = 11.0."},
+{c:"TRICKY MATH",q:"Indian mathematician Srinivasa Ramanujan identified 1729 as the smallest number expressible as the sum of two cubes in two different ways. Which are the two pairs?",o:["(1, 12) and (9, 10)", "(2, 11) and (8, 10)", "(3, 10) and (7, 9)", "(1, 11) and (6, 12)"],a:0,fact:"1³ + 12³ = 1 + 1728 = 1729, and 9³ + 10³ = 729 + 1000 = 1729."},
+{c:"TRICKY MATH",q:"At 3:40 PM Indian Standard Time, what is the acute angle between the hour hand and the minute hand of a wall clock?",o:["120°", "130°", "135°", "140°"],a:1,fact:"Angle formula |30H - 5.5M|: |30(3) - 5.5(40)| = |90 - 220| = 130°."},
+{c:"TRICKY MATH",q:"A Khadi store in Delhi offers successive discounts of 20% and 10% on a jacket tagged at ₹2,000. What is the final selling price?",o:["₹1,400", "₹1,440", "₹1,500", "₹1,480"],a:1,fact:"After 20% off: ₹1,600. After next 10% off: ₹1,600 - ₹160 = ₹1,440."},
+{c:"TRICKY MATH",q:"A Rajdhani Express train of length 200 m running at 72 km/h crosses a railway platform in 25 seconds. What is the length of the platform?",o:["250 m", "300 m", "350 m", "400 m"],a:1,fact:"Speed = 72 × 5/18 = 20 m/s. Distance = 20 × 25 = 500m. Platform = 500m - 200m = 300m."},
+{c:"TRICKY MATH",q:"Rahul's father was 28 years old when Rahul was born. His mother was 26 years old when his brother, who is 3 years younger than Rahul, was born. What is the age difference between Rahul's parents?",o:["2 years", "3 years", "5 years", "6 years"],a:2,fact:"When younger brother was born, father was 28 + 3 = 31 years old. Mother was 26. Difference = 31 - 26 = 5 years."},
+{c:"TRICKY MATH",q:"A smartphone is purchased in Bengaluru for ₹11,800 including 18% GST. What was the original price of the phone before GST?",o:["₹9,800", "₹10,000", "₹10,200", "₹9,676"],a:1,fact:"Base price = ₹11,800 ÷ 1.18 = ₹10,000 (GST amount is ₹1,800)."},
+{c:"TRICKY MATH",q:"If India's Independence Day (15th August) falls on a Friday in a non-leap year, on which day of the week will Gandhi Jayanti (2nd October) fall in the same year?",o:["Wednesday", "Thursday", "Friday", "Saturday"],a:1,fact:"Days count: 16 (Aug) + 30 (Sep) + 2 (Oct) = 48 days. 48 ÷ 7 leaves remainder 6. Friday + 6 days = Thursday."},
+{c:"TRICKY MATH",q:"A car travels from Jaipur to Agra at 60 km/h and returns along the same route at 40 km/h. What is the average speed for the entire round trip?",o:["50 km/h", "48 km/h", "45 km/h", "52 km/h"],a:1,fact:"Average speed for equal distances = 2xy/(x+y) = 2(60×40)/(60+40) = 4800/100 = 48 km/h."},
+{c:"TRICKY MATH",q:"A tea stall vendor in Kolkata has 40 litres of milk-water mixture in the ratio 3:1. How much water must be added so the ratio becomes 3:2?",o:["5 litres", "10 litres", "15 litres", "8 litres"],a:1,fact:"Initially: 30L milk and 10L water. To get ratio 3:2 with 30L milk, 20L water is required. Water to add = 20 - 10 = 10 litres."},
+{c:"TRICKY MATH",q:"In an Indian village, 12 workers can build a community canal in 15 days working 8 hours a day. How many days will 18 workers take working 10 hours a day?",o:["6 days", "8 days", "10 days", "12 days"],a:1,fact:"Using M₁D₁H₁ = M₂D₂H₂: 12 × 15 × 8 = 18 × D × 10 => 1440 = 180D => D = 8 days."},
+{c:"TRICKY MATH",q:"At a sports market in Meerut, 2 cricket bats and 3 balls cost ₹850, while 3 bats and 2 balls cost ₹1,150. What is the cost of 1 cricket bat?",o:["₹300", "₹350", "₹400", "₹450"],a:1,fact:"Adding equations: 5B + 5L = ₹2,000 => B + L = ₹400. Subtracting: B - L = ₹300. Adding both gives Bat = ₹350."},
+{c:"TRICKY MATH",q:"A sum of ₹5,000 deposited in an Indian Post Office scheme doubles in 5 years at compound interest. In how many years will it become ₹20,000?",o:["8 years", "10 years", "12 years", "15 years"],a:1,fact:"Amount doubles (2x) in 5 years. Becoming 4x (₹20,000) takes 5 × 2 = 10 years."},
+{c:"TRICKY MATH",q:"Two runners start simultaneously from the same point on a 400 m circular track in Patiala in the same direction at 10 m/s and 6 m/s. When will they meet again for the first time?",o:["60 seconds", "80 seconds", "100 seconds", "120 seconds"],a:2,fact:"Relative speed = 10 - 6 = 4 m/s. Time to meet = 400 ÷ 4 = 100 seconds."},
+{c:"TRICKY MATH",q:"A cloth merchant in Surat claims to sell cloth at cost price, but uses a faulty metre-rod measuring only 90 cm for every 100 cm. What is his actual profit percentage?",o:["10%", "11.11%", "12.5%", "9.09%"],a:1,fact:"Profit % = (Error ÷ True Value - Error) × 100 = (10 ÷ 90) × 100 = 11.11%."},
+{c:"TRICKY MATH",q:"In a village panchayat election with two candidates, the winner secured 58% of the valid votes and won by a margin of 480 votes. How many total valid votes were polled?",o:["2,400", "3,000", "3,200", "3,600"],a:1,fact:"Margin = 58% - 42% = 16%. 16% of Total = 480 => Total = 480 ÷ 0.16 = 3,000 votes."},
+{c:"TRICKY MATH",q:"If the price of Alphonso mangoes in Ratnagiri rises by 25%, by what percentage must a family reduce consumption to keep their budget unchanged?",o:["15%", "20%", "25%", "18.5%"],a:1,fact:"Reduction formula: [R ÷ (100 + R)] × 100 = (25 ÷ 125) × 100 = 20%."},
+{c:"TRICKY MATH",q:"A boat travels downstream in the River Ganga at 15 km/h and upstream at 9 km/h. What is the speed of the river current?",o:["2 km/h", "3 km/h", "4 km/h", "6 km/h"],a:1,fact:"Speed of stream = (Downstream - Upstream) ÷ 2 = (15 - 9) ÷ 2 = 3 km/h."},
+{c:"TRICKY MATH",q:"In a game of Ludo, two standard dice are rolled simultaneously. What is the probability that the sum of the numbers showing is a prime number?",o:["5/12", "7/18", "1/2", "4/9"],a:0,fact:"Prime sums are 2, 3, 5, 7, 11 (15 favorable pairs out of 36). Probability = 15/36 = 5/12."},
+{c:"TRICKY MATH",q:"Which of the following century years was a leap year according to the calendar used in India?",o:["1900", "2000", "2100", "1800"],a:1,fact:"A century year must be divisible by 400 to be a leap year. 2000 ÷ 400 = 5, making 2000 a leap year."},
+{c:"TRICKY MATH",q:"In an Indian cybersecurity numerical check, what is the unit digit of 7^105?",o:["1", "3", "7", "9"],a:2,fact:"Powers of 7 cycle in unit digits {7, 9, 3, 1} with period 4. 105 ÷ 4 leaves remainder 1, so the unit digit is 7."},
+{c:"TRICKY MATH",q:"Two trains of lengths 120 m and 180 m are running in opposite directions on parallel tracks at 54 km/h and 36 km/h. How many seconds do they take to pass each other?",o:["10 seconds", "12 seconds", "15 seconds", "18 seconds"],a:1,fact:"Total distance = 300m. Relative speed = 90 km/h = 25 m/s. Time = 300 ÷ 25 = 12 seconds."},
+{c:"TRICKY MATH",q:"On Children's Day, sweets are distributed equally among 240 students. If 40 students were absent, each remaining student received 2 sweets more. How many sweets were distributed in total?",o:["2,000", "2,400", "2,800", "3,200"],a:1,fact:"200 × (s + 2) = 240 × s => 40s = 400 => s = 10 sweets each. Total sweets = 240 × 10 = 2,400."},
+{c:"TRICKY MATH",q:"Traditional Indian 24-carat gold is 100% pure. If an ornament is crafted from 18-carat gold, what percentage of pure gold does it contain?",o:["70%", "72%", "75%", "80%"],a:2,fact:"Purity = (18 ÷ 24) × 100 = 75% pure gold."},
+{c:"TRICKY MATH",q:"Pipe A can fill a water tank in 6 hours, Pipe B in 9 hours, and waste pipe C empties it in 18 hours. If all three pipes are opened together, in how many hours will the tank be full?",o:["4 hours", "4.5 hours", "5 hours", "5.5 hours"],a:1,fact:"Net rate = 1/6 + 1/9 - 1/18 = 4/18 = 2/9 per hour. Time = 9 ÷ 2 = 4.5 hours."},
+{c:"TRICKY MATH",q:"A sum of money lent at simple interest amounts to ₹720 after 2 years and ₹1,020 after 5 years. What was the original principal amount?",o:["₹480", "₹500", "₹520", "₹550"],a:2,fact:"Interest for 3 years = ₹1,020 - ₹720 = ₹300 (₹100/yr). Principal = ₹720 - (2 × ₹100) = ₹520."},
+{c:"TRICKY MATH",q:"At a national conference in New Delhi attended by 12 delegates, everyone shakes hands with everyone else exactly once. How many total handshakes took place?",o:["60", "66", "72", "132"],a:1,fact:"Formula n(n-1)/2: 12 × 11 ÷ 2 = 66 handshakes."},
+{c:"TRICKY MATH",q:"A rectangular agricultural field in Punjab has a perimeter of 100 metres and an area of 600 square metres. What is the difference between its length and breadth?",o:["8 metres", "10 metres", "12 metres", "15 metres"],a:1,fact:"L + B = 50 and L × B = 600. The dimensions are 30m and 20m. Difference = 30 - 20 = 10 metres."},
+{c:"INDIA GK",q:"Who composed India's National Song 'Vande Mataram'?",o:["Rabindranath Tagore", "Bankim Chandra Chattopadhyay", "Sarojini Naidu", "Sri Aurobindo"],a:1,fact:"Bankim Chandra Chattopadhyay composed 'Vande Mataram' in his 1882 novel Anandamath."},
+{c:"INDIA GK",q:"Which is the highest mountain peak situated entirely within India's undisputed borders?",o:["Kanchenjunga", "Nanda Devi", "Kamet", "Saltoro Kangri"],a:1,fact:"Nanda Devi in Uttarakhand (7,816 m) is the highest peak situated entirely within India."},
+{c:"INDIA GK",q:"Which is the largest natural freshwater lake in India?",o:["Wular Lake", "Chilika Lake", "Vembanad Lake", "Loktak Lake"],a:0,fact:"Wular Lake in Jammu and Kashmir is India's largest freshwater lake, fed by the Jhelum River."},
+{c:"INDIA GK",q:"Who was the first Indian citizen to receive a Nobel Prize?",o:["C.V. Raman", "Rabindranath Tagore", "Mother Teresa", "Hargobind Khorana"],a:1,fact:"Rabindranath Tagore won the Nobel Prize in Literature in 1913 for Gitanjali."},
+{c:"INDIA GK",q:"What was the name of India's first satellite launched into space in 1975?",o:["Aryabhata", "Rohini", "Bhaskara-I", "INSAT-1A"],a:0,fact:"Aryabhata, named after the ancient Indian astronomer, was launched on 19 April 1975."},
+{c:"INDIA GK",q:"Which is India's oldest national park, established in 1936?",o:["Jim Corbett National Park", "Kaziranga National Park", "Gir National Park", "Kanha National Park"],a:0,fact:"Established in 1936 as Hailey National Park in Uttarakhand, it was later renamed Jim Corbett National Park."},
+{c:"INDIA GK",q:"Which is the longest river that flows entirely within the territory of India?",o:["Ganga", "Godavari", "Krishna", "Narmada"],a:1,fact:"The Godavari (1,465 km), known as Dakshin Ganga, is the longest river flowing entirely within India."},
+{c:"INDIA GK",q:"Which Indus Valley Civilization site in Gujarat is world-famous for its ancient tidal dockyard?",o:["Dholavira", "Lothal", "Kalibangan", "Rakhigarhi"],a:1,fact:"Lothal in Gujarat features the world's earliest known tidal dockyard dating back to ~2400 BCE."},
+{c:"INDIA GK",q:"Which creature is officially designated as the National Aquatic Animal of India?",o:["Gharial", "Ganges River Dolphin", "Olive Ridley Sea Turtle", "Golden Mahseer"],a:1,fact:"The Ganges River Dolphin (Platanista gangetica) was declared the National Aquatic Animal in 2009."},
+{c:"INDIA GK",q:"Who is widely revered as the 'Father of the Indian Space Programme'?",o:["Dr. Homi Bhabha", "Dr. Vikram Sarabhai", "Dr. A.P.J. Abdul Kalam", "Prof. Satish Dhawan"],a:1,fact:"Dr. Vikram Sarabhai founded INCOSPAR in 1962, which grew into ISRO in 1969."},
+{c:"INDIA GK",q:"Which Indian state has the longest mainland coastline?",o:["Andhra Pradesh", "Tamil Nadu", "Maharashtra", "Gujarat"],a:3,fact:"Gujarat possesses India's longest mainland coastline, spanning approximately 1,600 km."},
+{c:"INDIA GK",q:"Sattriya is an official classical dance form originating from which Indian state?",o:["Assam", "Manipur", "Odisha", "Kerala"],a:0,fact:"Sattriya dance was introduced in 15th-century monasteries (Sattras) of Assam by Srimanta Sankardev."},
+{c:"INDIA GK",q:"Where is the only confirmed active volcano in India located?",o:["Barren Island", "Narcondam Island", "Minicoy Island", "Neil Island"],a:0,fact:"Barren Island in the Andaman and Nicobar Islands is the only confirmed active volcano in South Asia."},
+{c:"INDIA GK",q:"The world's highest railway arch bridge was constructed in Jammu & Kashmir across which river?",o:["Jhelum", "Chenab", "Ravi", "Indus"],a:1,fact:"The Chenab Rail Bridge stands 359 metres above the riverbed, 35 metres higher than the Eiffel Tower."},
+{c:"INDIA GK",q:"Which is India's highest military decoration awarded for wartime valour?",o:["Maha Vir Chakra", "Param Vir Chakra", "Ashoka Chakra", "Kirti Chakra"],a:1,fact:"Param Vir Chakra is India's highest wartime gallantry award, first awarded to Major Somnath Sharma."},
+{c:"INDIA GK",q:"The national motto of India, 'Satyameva Jayate', is taken from which ancient Indian text?",o:["Katha Upanishad", "Mundaka Upanishad", "Rigveda", "Bhagavad Gita"],a:1,fact:"'Satyameva Jayate' (Truth alone triumphs) is inscribed from the Mundaka Upanishad."},
+{c:"INDIA GK",q:"Who was the first woman of Indian origin to travel to space?",o:["Sunita Williams", "Kalpana Chawla", "Sirisha Bandla", "Shawna Pandya"],a:1,fact:"Kalpana Chawla, born in Karnal, Haryana, first flew to space aboard STS-87 in 1997."},
+{c:"INDIA GK",q:"The Great Stupa at Sanchi, a UNESCO World Heritage site built by Emperor Ashoka, is in which state?",o:["Bihar", "Madhya Pradesh", "Uttar Pradesh", "Rajasthan"],a:1,fact:"The Great Sanchi Stupa is located in the Raisen district of Madhya Pradesh."},
+{c:"INDIA GK",q:"Who was the first Indian athlete to win an individual Olympic gold medal?",o:["Neeraj Chopra", "Abhinav Bindra", "K.D. Jadhav", "Sushil Kumar"],a:1,fact:"Abhinav Bindra won gold in the 10m Air Rifle event at the 2008 Beijing Olympics."},
+{c:"INDIA GK",q:"Through how many Indian states does the Tropic of Cancer pass?",o:["6", "7", "8", "9"],a:2,fact:"The Tropic of Cancer passes through 8 states: Gujarat, Rajasthan, MP, Chhattisgarh, Jharkhand, WB, Tripura, and Mizoram."},
+{c:"INDIA GK",q:"Keibul Lamjao National Park, famous for its floating phumdis and Sangai deer, is located in which state?",o:["Manipur", "Meghalaya", "Nagaland", "Mizoram"],a:0,fact:"Keibul Lamjao on Loktak Lake in Manipur is the world's only floating national park."},
+{c:"INDIA GK",q:"Which city is globally and nationally known as the 'Silicon Valley of India'?",o:["Hyderabad", "Bengaluru", "Pune", "Gurugram"],a:1,fact:"Bengaluru is recognized as the Silicon Valley of India as its premier IT and technology hub."},
+{c:"INDIA GK",q:"Which era forms the basis of India's official National Civil Calendar?",o:["Vikram Samvat", "Saka Era", "Hijri Era", "Gupta Era"],a:1,fact:"The Saka Calendar (starting 78 CE) was officially adopted by the Government of India in 1957."},
+{c:"INDIA GK",q:"Sir C.V. Raman won the 1930 Nobel Prize in Physics for his discovery related to which phenomenon?",o:["Photoelectric effect", "Scattering of light", "Wave nature of electrons", "Superconductivity"],a:1,fact:"The discovery of the Raman Effect on 28 February 1928 is celebrated as National Science Day in India."},
+{c:"INDIA GK",q:"Which is the largest coastal saltwater lagoon in India?",o:["Pulicat Lake", "Chilika Lake", "Kolleru Lake", "Ashtamudi Lake"],a:1,fact:"Chilika Lake in Odisha is Asia's largest brackish water lagoon."},
+{c:"INDIA GK",q:"Which satellite was first placed into orbit by an indigenous Indian launch vehicle (SLV-3) in 1980?",o:["Aryabhata", "Rohini RS-1", "Bhaskara-I", "APPLE"],a:1,fact:"Rohini RS-1 was successfully launched by SLV-3 from Sriharikota on 18 July 1980."},
+{c:"INDIA GK",q:"The ancient Buddhist rock-cut caves of Ajanta are located in which district of Maharashtra?",o:["Pune", "Chhatrapati Sambhajinagar (Aurangabad)", "Nashik", "Kolhapur"],a:1,fact:"Ajanta Caves are located in Chhatrapati Sambhajinagar district of Maharashtra."},
+{c:"INDIA GK",q:"Who is venerated as the 'Father of the Indian Nuclear Programme'?",o:["Dr. Homi Jehangir Bhabha", "Dr. Raja Ramanna", "Dr. Meghnad Saha", "Dr. Shanti Swaroop Bhatnagar"],a:0,fact:"Dr. Homi Jehangir Bhabha laid the foundations of India's nuclear energy and research infrastructure."},
+{c:"INDIA GK",q:"Which was the first state in independent India created on a linguistic basis in 1953?",o:["Kerala", "Andhra State", "Gujarat", "Karnataka"],a:1,fact:"Andhra State was created on 1 October 1953 for Telugu-speaking regions."},
+{c:"INDIA GK",q:"Kunchikal Falls, one of India's highest tiered waterfalls, is located on which river in Karnataka?",o:["Sharavathi", "Varahi", "Kaveri", "Netravati"],a:1,fact:"Kunchikal Falls cascades down 455 metres along the Varahi River in Shimoga, Karnataka."},
+{c:"INDIA GK",q:"Who was the first woman to serve as the Prime Minister of India?",o:["Sarojini Naidu", "Indira Gandhi", "Sucheta Kripalani", "Pratibha Patil"],a:1,fact:"Indira Gandhi was sworn in as Prime Minister on 24 January 1966."},
+{c:"INDIA GK",q:"Kaziranga National Park in Assam holds the world's largest population of which iconic animal?",o:["Bengal Tiger", "Great One-Horned Rhinoceros", "Asian Elephant", "Snow Leopard"],a:1,fact:"Kaziranga is home to two-thirds of the world's Great One-Horned Rhinoceros population."},
+{c:"INDIA GK",q:"Who designed the original tri-colour design upon which India's National Flag is based?",o:["Pingali Venkayya", "Rabindranath Tagore", "B.R. Ambedkar", "C. Rajagopalachari"],a:0,fact:"Freedom fighter Pingali Venkayya from Andhra Pradesh designed the flag presented to Mahatma Gandhi."},
+{c:"INDIA GK",q:"Which is the longest national highway in India, connecting Srinagar to Kanyakumari?",o:["NH 44", "NH 48", "NH 27", "NH 19"],a:0,fact:"NH 44 stretches over 4,112 km from Srinagar in the north to Kanyakumari in the south."},
+{c:"INDIA GK",q:"Which river in India crosses the Tropic of Cancer twice?",o:["Narmada", "Tapi", "Mahi", "Sabarmati"],a:2,fact:"The Mahi River flows through MP, Rajasthan, and Gujarat, crossing the Tropic of Cancer twice."},
+{c:"POLITICS",q:"Who served as the Chairman of the Drafting Committee of the Constituent Assembly of India?",o:["Dr. Rajendra Prasad", "Dr. B.R. Ambedkar", "Jawaharlal Nehru", "Sardar Vallabhbhai Patel"],a:1,fact:"Dr. B.R. Ambedkar chaired the Drafting Committee and is recognized as the Chief Architect of the Constitution."},
+{c:"POLITICS",q:"Who was elected as the permanent President of the Constituent Assembly in December 1946?",o:["Dr. Sachchidananda Sinha", "Dr. Rajendra Prasad", "B.N. Rau", "C. Rajagopalachari"],a:1,fact:"Dr. Rajendra Prasad was elected permanent President of the Assembly on 11 December 1946."},
+{c:"POLITICS",q:"Which Article was described by Dr. B.R. Ambedkar as the 'Heart and Soul of the Indian Constitution'?",o:["Article 14", "Article 19", "Article 21", "Article 32"],a:3,fact:"Article 32 guarantees the Right to Constitutional Remedies to enforce Fundamental Rights."},
+{c:"POLITICS",q:"What is the minimum constitutional age required to become a member of the Lok Sabha?",o:["21 years", "25 years", "30 years", "35 years"],a:1,fact:"Under Article 84(b), the minimum age to contest for Lok Sabha is 25 years (30 years for Rajya Sabha)."},
+{c:"POLITICS",q:"Who is the constitutional ex-officio Chairman of the Rajya Sabha?",o:["President of India", "Vice-President of India", "Prime Minister", "Chief Justice of India"],a:1,fact:"Under Article 64, the Vice-President of India is the ex-officio Chairman of the Rajya Sabha."},
+{c:"POLITICS",q:"What is the term of office for an elected member of the Rajya Sabha?",o:["4 years", "5 years", "6 years", "Permanent without term"],a:2,fact:"Rajya Sabha members are elected for 6-year terms, with one-third retiring every two years."},
+{c:"POLITICS",q:"In the landmark Puttaswamy judgment (2017), Right to Privacy was declared a fundamental right under which Article?",o:["Article 14", "Article 19", "Article 21", "Article 25"],a:2,fact:"A 9-judge bench ruled that the Right to Privacy is protected under Article 21 (Right to Life and Personal Liberty)."},
+{c:"POLITICS",q:"Which Article of the Indian Constitution abolishes 'Untouchability' and forbids its practice?",o:["Article 15", "Article 16", "Article 17", "Article 18"],a:2,fact:"Article 17 abolishes untouchability in all forms and makes its practice punishable by law."},
+{c:"POLITICS",q:"Which Constitutional Amendment added Article 21A, making education a Fundamental Right for children aged 6 to 14?",o:["42nd Amendment", "44th Amendment", "86th Amendment", "73rd Amendment"],a:2,fact:"The 86th Constitutional Amendment Act, 2002 enacted Article 21A (Right to Education)."},
+{c:"POLITICS",q:"Which judicial bodies have constitutional power to issue writs to enforce Fundamental Rights in India?",o:["Parliament and State Assemblies", "Supreme Court and High Courts", "President and Governors", "District Courts"],a:1,fact:"The Supreme Court (Article 32) and High Courts (Article 226) possess constitutional writ jurisdiction."},
+{c:"POLITICS",q:"What is the minimum age prescribed by the Constitution to be eligible for election as President of India?",o:["25 years", "30 years", "35 years", "40 years"],a:2,fact:"Article 58 specifies that a Presidential candidate must be at least 35 years of age."},
+{c:"POLITICS",q:"Under which Article can the President declare a National Emergency on grounds of war, external aggression, or armed rebellion?",o:["Article 352", "Article 356", "Article 360", "Article 365"],a:0,fact:"Article 352 provides for the proclamation of National Emergency by the President."},
+{c:"POLITICS",q:"How many times has a Financial Emergency under Article 360 been declared in India?",o:["Never", "Once", "Twice", "Three times"],a:0,fact:"Financial Emergency under Article 360 has never been declared in India to date."},
+{c:"POLITICS",q:"Which Constitutional Amendment Act accorded constitutional status to Panchayati Raj institutions in 1992?",o:["42nd Amendment", "44th Amendment", "73rd Amendment", "74th Amendment"],a:2,fact:"The 73rd Amendment Act, 1992 inserted Part IX and the 11th Schedule for Panchayati Raj."},
+{c:"POLITICS",q:"Which Article of the Indian Constitution provides for the independent Election Commission of India?",o:["Article 280", "Article 324", "Article 343", "Article 350"],a:1,fact:"Article 324 vests superintendence, direction, and control of elections in the Election Commission."},
+{c:"POLITICS",q:"The Comptroller and Auditor General (CAG) of India is appointed under which Article of the Constitution?",o:["Article 76", "Article 148", "Article 165", "Article 280"],a:1,fact:"Article 148 establishes the independent constitutional office of the CAG."},
+{c:"POLITICS",q:"Who is designated as the highest law officer of the Government of India under Article 76?",o:["Chief Justice of India", "Attorney General for India", "Solicitor General of India", "Law Minister of India"],a:1,fact:"The Attorney General for India is appointed by the President as the chief legal adviser to the Union."},
+{c:"POLITICS",q:"Under Article 343(1), the official language of the Union is Hindi in which script?",o:["Brahmi", "Devanagari", "Kharosthi", "Modi"],a:1,fact:"Article 343(1) states: 'The official language of the Union shall be Hindi in Devanagari script.'"},
+{c:"POLITICS",q:"The words 'Socialist', 'Secular', and 'Integrity' were added to the Preamble by which Constitutional Amendment?",o:["24th Amendment", "42nd Amendment", "44th Amendment", "52nd Amendment"],a:1,fact:"The 42nd Amendment Act of 1976 added Socialist, Secular, and Integrity to the Preamble."},
+{c:"POLITICS",q:"Which Schedule was added to the Constitution by the 52nd Amendment Act to introduce the Anti-Defection Law?",o:["8th Schedule", "9th Schedule", "10th Schedule", "11th Schedule"],a:2,fact:"The 10th Schedule was added in 1985 to disqualify legislators who defect to another party."},
+{c:"POLITICS",q:"What is the constitutionally specified retirement age for a Judge of the Supreme Court of India?",o:["60 years", "62 years", "65 years", "70 years"],a:2,fact:"Supreme Court judges retire at 65 years, while High Court judges retire at 62 years."},
+{c:"POLITICS",q:"Who presides over a Joint Sitting of both Houses of Parliament summoned under Article 108?",o:["President of India", "Vice-President of India", "Speaker of the Lok Sabha", "Prime Minister"],a:2,fact:"A Joint Sitting is summoned by the President but presided over by the Speaker of the Lok Sabha."},
+{c:"POLITICS",q:"Which House of Parliament holds exclusive power regarding Money Bills under the Indian Constitution?",o:["Lok Sabha", "Rajya Sabha", "Both Houses equally", "Joint Committee"],a:0,fact:"Under Article 109, Money Bills can only be introduced in Lok Sabha and Rajya Sabha cannot reject them."},
+{c:"POLITICS",q:"Who was the first Chief Election Commissioner of independent India?",o:["Sukumar Sen", "K.V.K. Sundaram", "T.N. Seshan", "Nagendra Singh"],a:0,fact:"Sukumar Sen organized India's historic first general elections in 1951-52."},
+{c:"POLITICS",q:"Under which Article are the Fundamental Duties of Indian citizens listed in Part IVA?",o:["Article 39A", "Article 48A", "Article 51A", "Article 300A"],a:2,fact:"Article 51A was added by the 42nd Amendment based on the Swaran Singh Committee recommendations."},
+{c:"POLITICS",q:"Which Constitutional Amendment Act reduced the voting age in India from 21 to 18 years?",o:["44th Amendment Act", "61st Amendment Act", "69th Amendment Act", "73rd Amendment Act"],a:1,fact:"The 61st Amendment Act, 1988 amended Article 326 to lower the voting age to 18 years."},
+{c:"POLITICS",q:"Under Article 155, who appoints the Governor of an Indian State?",o:["Chief Minister of the State", "President of India", "Prime Minister", "Chief Justice of the High Court"],a:1,fact:"The Governor of a State is appointed by the President of India by warrant under hand and seal."},
+{c:"POLITICS",q:"Under which Article does the President constitute the Finance Commission every five years?",o:["Article 268", "Article 280", "Article 300", "Article 312"],a:1,fact:"Article 280 provides for the Finance Commission to recommend allocation of central taxes to states."},
+{c:"POLITICS",q:"Who was the first Speaker of the Lok Sabha in independent India?",o:["M.A. Ayyangar", "G.V. Mavalankar", "Hukam Singh", "Neelam Sanjiva Reddy"],a:1,fact:"Ganesh Vasudev (G.V.) Mavalankar presided as Speaker of the 1st Lok Sabha from 1952 to 1956."},
+{c:"POLITICS",q:"Which Article among the Directive Principles directs the State to secure a Uniform Civil Code (UCC) for all citizens?",o:["Article 40", "Article 44", "Article 45", "Article 50"],a:1,fact:"Article 44 directs that the State shall endeavour to secure for citizens a Uniform Civil Code."},
+{c:"POLITICS",q:"Under which Article can President's Rule be imposed on a State due to failure of constitutional machinery?",o:["Article 352", "Article 356", "Article 360", "Article 370"],a:1,fact:"Article 356 permits the Union Government to impose President's Rule in a state."},
+{c:"POLITICS",q:"Following the 44th Constitutional Amendment (1978), Right to Property is placed under Article 300A as what kind of right?",o:["Moral right", "Legal / Constitutional right", "Fundamental right", "Directive principle"],a:1,fact:"The 44th Amendment removed property from Fundamental Rights and made it a constitutional right under Article 300A."},
+{c:"POLITICS",q:"Under Article 312, which House of Parliament has the exclusive power to initiate the creation of new All India Services?",o:["Lok Sabha", "Rajya Sabha", "NITI Aayog", "Supreme Court"],a:1,fact:"Article 312 gives Rajya Sabha the exclusive power to initiate new All India Services via a 2/3rd resolution."},
+{c:"POLITICS",q:"The 'Basic Structure Doctrine' of the Constitution of India was established by the Supreme Court in which landmark 1973 case?",o:["Golaknath case", "Kesavananda Bharati case", "Minerva Mills case", "Maneka Gandhi case"],a:1,fact:"The Kesavananda Bharati case (1973) established that Parliament cannot alter the basic structure of the Constitution."},
+{c:"POLITICS",q:"On which date was the Constitution of India formally adopted by the Constituent Assembly (celebrated as Constitution Day)?",o:["15 August 1947", "26 November 1949", "26 January 1950", "30 January 1948"],a:1,fact:"The Constitution was adopted on 26 November 1949 and came into effect on 26 January 1950."}
 ];
 
 const $ = id => document.getElementById(id);
@@ -1023,9 +1122,18 @@ let isLocked = false;
 let isPaused = false;
 let autoAdvanceTimeout = null;
 
-// Initialize and unlock audio on first user touch / click
-window.addEventListener('click', () => sounds.init(), { once: true });
-window.addEventListener('touchstart', () => sounds.init(), { once: true });
+// Initialize and unlock audio on user gesture
+function unlockAudio() {
+  sounds.init();
+  const banner = document.getElementById("audioUnlockBanner");
+  if (banner && sounds.ctx && sounds.ctx.state === 'running') {
+    banner.classList.add("hidden");
+  }
+}
+window.addEventListener('click', unlockAudio);
+window.addEventListener('touchstart', unlockAudio);
+window.addEventListener('pointerdown', unlockAudio);
+window.addEventListener('keydown', unlockAudio);
 
 function renderQuestion() {
   clearInterval(timerId);
@@ -1044,8 +1152,10 @@ function renderQuestion() {
   $("progressBar").style.width = ((index + 1) / questions.length * 100) + "%";
   
   // Category Emoji
-  let icon = "🌍";
-  if (q.c === "INDIA") icon = "🇮🇳";
+  let icon = "🇮🇳";
+  if (q.c.includes("MATH")) icon = "🧮";
+  else if (q.c.includes("POLIT") || q.c.includes("POLITY")) icon = "🏛️";
+  else if (q.c.includes("GK") || q.c.includes("INDIA")) icon = "🇮🇳";
   else if (q.c === "SCIENCE") icon = "🔬";
   else if (q.c === "TECH") icon = "💻";
   else if (q.c === "CLIMATE") icon = "🌱";
@@ -1079,14 +1189,17 @@ function renderQuestion() {
 
   updateTimerDisplay();
 
+  // Start chime for the question
+  sounds.playQuestionStart();
+
   // 1-second interval countdown
   timerId = setInterval(() => {
     if (isPaused || isLocked) return;
     timeLeft--;
     
-    // Play copyright-free audio tick
+    // Play copyright-free audio tick (audible tick-tock for 25s, urgent alarm for 5s)
     if (timeLeft > 0) {
-      sounds.playTick(timeLeft <= 5);
+      sounds.playTick(timeLeft <= 5, timeLeft);
     }
     
     updateTimerDisplay();
@@ -1136,19 +1249,20 @@ function revealAnswer(userChoice) {
   });
 
   const feedback = $("feedbackBox");
+  const factHtml = q.fact ? `<div style="margin-top:6px;font-size:0.84rem;color:#fcd34d;font-weight:600;">💡 ${q.fact}</div>` : "";
   if (userChoice === q.a) {
     score += 10;
     $("scoreVal").textContent = score;
     sounds.playCorrect();
-    feedback.innerHTML = `🎉 <strong>Correct! +10 Points.</strong> ${q.fact || "Great job to everyone in chat who picked right!"}`;
+    feedback.innerHTML = `🎉 <strong>Correct! +10 Points.</strong> ${factHtml || "Great job to everyone in chat who picked right!"}`;
     $("timerStatus").textContent = "✅ Correct answer locked in!";
   } else if (userChoice === null) {
     sounds.playTimesUp();
-    feedback.innerHTML = `⏰ <strong>Time's Up!</strong> Correct answer is <strong>Option ${String.fromCharCode(65 + q.a)}: ${q.o[q.a]}</strong>.`;
+    feedback.innerHTML = `⏰ <strong>Time's Up!</strong> Correct answer is <strong>Option ${String.fromCharCode(65 + q.a)}: ${q.o[q.a]}</strong>.${factHtml}`;
     $("timerStatus").textContent = "⏳ Time expired!";
   } else {
     sounds.playWrong();
-    feedback.innerHTML = `❌ <strong>Incorrect!</strong> Correct answer was <strong>Option ${String.fromCharCode(65 + q.a)}: ${q.o[q.a]}</strong>.`;
+    feedback.innerHTML = `❌ <strong>Incorrect!</strong> Correct answer was <strong>Option ${String.fromCharCode(65 + q.a)}: ${q.o[q.a]}</strong>.${factHtml}`;
     $("timerStatus").textContent = "❌ Answer revealed!";
   }
 
@@ -1212,10 +1326,13 @@ $("pauseBtn").addEventListener("click", () => {
 
 // Sound Toggle (Mute / Unmute)
 $("soundBtn").addEventListener("click", () => {
-  sounds.enabled = !sounds.enabled;
+  unlockAudio();
+  const nextState = !sounds.enabled;
+  sounds.setEnabled(nextState);
   if (sounds.enabled) {
     $("soundBtn").textContent = "🔊";
     $("soundBtn").classList.remove("active");
+    sounds.playTick(false, 30); // Immediate feedback click
   } else {
     $("soundBtn").textContent = "🔇";
     $("soundBtn").classList.add("active");
